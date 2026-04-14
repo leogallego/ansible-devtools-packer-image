@@ -1,0 +1,27 @@
+---
+- name: Build ansible-dev-tools image (pip pinned)
+  hosts: all
+  gather_facts: true
+  become: true
+  vars:
+    lab_user: "rhel"
+    code_server_password: 'ansible123!'
+    ansible_dev_tools_version: "26.4.1"
+  tasks:
+    - name: Include base setup
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/tasks/base_setup.yml"
+
+    - name: Include Python setup
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/tasks/python_setup.yml"
+
+    - name: Install ansible-dev-tools via pip (pinned)
+      ansible.builtin.pip:
+        name: "ansible-dev-tools=={{ ansible_dev_tools_version }}"
+        state: present
+        executable: pip3.11
+
+    - name: Include image cleanup
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/tasks/image_cleanup.yml"
