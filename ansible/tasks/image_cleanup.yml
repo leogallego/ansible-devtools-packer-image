@@ -27,12 +27,14 @@
     path: /etc/dnf/automatic.conf
     regexp: '^download_updates'
     line: download_updates = no
+    backup: true
 
 - name: Set apply_updates = no in automatic.conf
   ansible.builtin.lineinfile:
     path: /etc/dnf/automatic.conf
     regexp: '^apply_updates'
     line: apply_updates = no
+    backup: true
 
 - name: Apply GCP RHUI repo configuration
   ansible.builtin.template:
@@ -86,6 +88,6 @@
     - "{{ lab_user }}"
     - root
   register: __image_cleanup_podman_logout
-  changed_when: __image_cleanup_podman_logout.rc == 0
+  changed_when: "'Removed login credentials' in __image_cleanup_podman_logout.stdout | default('')"
   failed_when: false
   # Guard: only relevant when EE pulling is added (see GitHub issue #2)

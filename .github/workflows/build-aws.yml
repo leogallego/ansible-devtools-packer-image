@@ -16,10 +16,12 @@ on:
 
 env:
   PACKER_VERSION: "latest"
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
 
     steps:
       - name: Checkout repository
@@ -30,10 +32,10 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Packer
-        uses: hashicorp/setup-packer@main
+        uses: hashicorp/setup-packer@v3
         with:
           version: ${{ env.PACKER_VERSION }}
 
@@ -44,7 +46,7 @@ jobs:
         run: >-
           packer validate
           -var="variant=${{ github.event.inputs.variant }}"
-          -var="aws_region=${{ vars.AWS_REGION || 'us-east-1' }}"
+          -var="aws_region=${{ env.AWS_REGION }}"
           .
 
       - name: Build AMI
@@ -52,7 +54,7 @@ jobs:
           packer build
           -only='amazon-ebs.*'
           -var="variant=${{ github.event.inputs.variant }}"
-          -var="aws_region=${{ vars.AWS_REGION || 'us-east-1' }}"
+          -var="aws_region=${{ env.AWS_REGION }}"
           -force
           .
 
@@ -60,7 +62,7 @@ jobs:
         id: get-ami
         run: |
           VARIANT="${{ github.event.inputs.variant }}"
-          REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
+          REGION="${{ env.AWS_REGION }}"
 
           # Find the AMI built by Packer (most recent with matching prefix)
           AMI_ID=$(aws ec2 describe-images \
@@ -84,7 +86,7 @@ jobs:
       - name: Export AMI to S3 as raw
         id: export-ami
         env:
-          AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
         run: |
           AMI_ID="${{ steps.get-ami.outputs.ami_id }}"
           S3_BUCKET="${{ vars.S3_BUCKET_NAME || 'ansible-dev-tools-images' }}"
@@ -108,7 +110,7 @@ jobs:
           EXPORT_TASK_ID="${{ steps.export-ami.outputs.export_task_id }}"
           S3_BUCKET="${{ vars.S3_BUCKET_NAME || 'ansible-dev-tools-images' }}"
           VARIANT="${{ github.event.inputs.variant }}"
-          REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
+          REGION="${{ env.AWS_REGION }}"
           FINAL_NAME="${{ steps.get-ami.outputs.final_name }}"
           QCOW2_FILE="${FINAL_NAME}.qcow2"
           QCOW2_S3_KEY="ansible-dev-tools/${VARIANT}/${QCOW2_FILE}"
@@ -153,11 +155,13 @@ jobs:
                 --query 'GroupId' \
                 --output text)
 
+              RUNNER_IP=$(curl -s https://checkip.amazonaws.com)
+
               aws ec2 authorize-security-group-ingress \
                 --group-id "$TEMP_SG_ID" \
                 --protocol tcp \
                 --port 22 \
-                --cidr 0.0.0.0/0
+                --cidr "${RUNNER_IP}/32"
 
               KEY_NAME="converter-$(date +%s)"
               aws ec2 import-key-pair \
@@ -302,7 +306,7 @@ jobs:
         if: always()
         run: |
           AMI_ID="${{ steps.get-ami.outputs.ami_id }}"
-          REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
+          REGION="${{ env.AWS_REGION }}"
 
           if [ -n "$AMI_ID" ] && [ "$AMI_ID" != "null" ]; then
             SNAPSHOT_IDS=$(aws ec2 describe-images \

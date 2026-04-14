@@ -21,6 +21,7 @@
         src: "{{ playbook_dir }}/aap.tar.gz"
         dest: /tmp/aap.tar.gz
         mode: "0644"
+        backup: true
 
     - name: Create AAP install directory
       ansible.builtin.file:
