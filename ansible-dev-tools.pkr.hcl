@@ -1,15 +1,15 @@
 packer {
   required_plugins {
     ansible = {
-      version = ">= v1.1.2"
+      version = ">= v1.1.4"
       source  = "github.com/hashicorp/ansible"
     }
     googlecompute = {
-      version = ">= v1.1.6"
+      version = ">= v1.2.5"
       source  = "github.com/hashicorp/googlecompute"
     }
     amazon = {
-      version = ">= v1.3.0"
+      version = ">= v1.8.0"
       source  = "github.com/hashicorp/amazon"
     }
   }
