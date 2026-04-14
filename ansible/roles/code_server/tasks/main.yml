@@ -1,0 +1,10 @@
+---
+- name: Install code-server for image build
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/tasks/install.yml"
+  when: not code_server_prebuild | bool
+
+- name: Reconfigure code-server at runtime
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/tasks/configure.yml"
+  when: code_server_prebuild | bool

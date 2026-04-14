@@ -1,0 +1,41 @@
+---
+argument_specs:
+  main:
+    short_description: Set up code-server, main entrypoint.
+    options:
+      code_server_version:
+        description: The version of code-server to install.
+        type: str
+        required: false
+        default: "4.115.0"
+      code_server_rpm_url:
+        description: URL to the code-server RPM package.
+        type: str
+        required: false
+      code_server_username:
+        description: The system user to run code-server as.
+        type: str
+        required: false
+        default: rhel
+      code_server_password:
+        description: The code-server admin password.
+        type: str
+        required: false
+        default: ansible123!
+      code_server_prebuild:
+        description: >-
+          When true, only reconfigure (configure.yml).
+          When false, full install (install.yml).
+        type: bool
+        required: false
+        default: false
+      code_server_authentication:
+        description: Enable code-server password authentication.
+        type: bool
+        required: false
+        default: false
+      code_server_extensions:
+        description: List of VS Code extensions to install.
+        type: list
+        elements: dict
+        required: false

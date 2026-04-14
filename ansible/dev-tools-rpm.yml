@@ -1,0 +1,58 @@
+---
+- name: Build ansible-dev-tools image (rpm)
+  hosts: all
+  gather_facts: true
+  become: true
+  vars:
+    lab_user: "rhel"
+    code_server_password: 'ansible123!'
+    ansible_dev_tools_version: "26.1.0"
+  tasks:
+    - name: Include base setup
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/tasks/base_setup.yml"
+
+    - name: Include Python setup
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/tasks/python_setup.yml"
+
+    - name: Copy AAP bundle to target
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/aap.tar.gz"
+        dest: /tmp/aap.tar.gz
+        mode: "0644"
+        backup: true
+
+    - name: Create AAP install directory
+      ansible.builtin.file:
+        path: /tmp/aap_install
+        state: directory
+        mode: "0755"
+
+    - name: Extract AAP bundle
+      ansible.builtin.unarchive:
+        src: /tmp/aap.tar.gz
+        dest: /tmp/aap_install
+        remote_src: true
+        extra_opts:
+          - '--strip-components=1'
+          - '--show-stored-names'
+
+    - name: Create AAP yum repository
+      ansible.builtin.yum_repository:
+        name: aap_installer
+        description: AAP Installer Repository
+        baseurl: "file:///tmp/aap_install/bundle/packages/el9/repos"
+        gpgcheck: false
+
+    - name: Install ansible-dev-tools via RPM
+      ansible.builtin.dnf:
+        name:
+          - "ansible-dev-tools-{{ ansible_dev_tools_version }}"
+          - ansible-core
+          - podman
+        state: present
+
+    - name: Include image cleanup
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/tasks/image_cleanup.yml"

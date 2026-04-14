@@ -1,0 +1,30 @@
+{{ ansible_managed | comment }}
+[rhui-rhel-{{ ansible_facts['distribution_major_version'] }}-for-x86_64-appstream-rhui-rpms]
+name=Red Hat Enterprise Linux {{ ansible_facts['distribution_major_version'] }} for x86_64 - AppStream from RHUI (RPMs)
+mirrorlist=https://rhui.googlecloud.com/pulp/mirror/content/dist/rhel{{ ansible_facts['distribution_major_version'] }}/rhui/$releasever/x86_64/appstream/os
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+sslverify=0
+sslclientcert=/etc/pki/rhui/product/content.crt
+sslclientkey=/etc/pki/rhui/key.pem
+
+[rhui-rhel-{{ ansible_facts['distribution_major_version'] }}-for-x86_64-baseos-rhui-rpms]
+name=Red Hat Enterprise Linux {{ ansible_facts['distribution_major_version'] }} for x86_64 - BaseOS from RHUI (RPMs)
+mirrorlist=https://rhui.googlecloud.com/pulp/mirror/content/dist/rhel{{ ansible_facts['distribution_major_version'] }}/rhui/$releasever/x86_64/baseos/os
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+sslverify=0
+sslclientcert=/etc/pki/rhui/product/content.crt
+sslclientkey=/etc/pki/rhui/key.pem
+
+[rhui-codeready-builder-for-rhel-{{ ansible_facts['distribution_major_version'] }}-$basearch-rhui-rpms]
+name=Red Hat CodeReady Linux Builder for RHEL {{ ansible_facts['distribution_major_version'] }} $basearch (RPMs) from RHUI
+mirrorlist=https://rhui.googlecloud.com/pulp/mirror/content/dist/rhel9/rhui/$releasever/$basearch/codeready-builder/os
+enabled=0
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+sslverify=1
+sslclientcert=/etc/pki/rhui/product/content.crt
+sslclientkey=/etc/pki/rhui/key.pem

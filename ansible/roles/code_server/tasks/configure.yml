@@ -1,0 +1,16 @@
+---
+- name: Apply code-server systemd service file
+  ansible.builtin.template:
+    src: code-server.service.j2
+    dest: /etc/systemd/system/code-server.service
+    owner: "{{ code_server_username }}"
+    group: wheel
+    mode: "0744"
+    backup: true
+
+- name: Restart code-server
+  ansible.builtin.systemd:
+    name: code-server
+    enabled: true
+    state: restarted
+    daemon_reload: true

@@ -1,0 +1,69 @@
+---
+- name: Install base packages
+  ansible.builtin.dnf:
+    name:
+      - python3-pip
+      - rsync
+    state: present
+
+- name: Install passlib Python package
+  ansible.builtin.pip:
+    name: passlib
+
+- name: Configure lab user '{{ lab_user }}'
+  ansible.builtin.user:
+    name: "{{ lab_user }}"
+    shell: /bin/bash
+    password: "{{ code_server_password | password_hash('sha512', 'mysecretsalt') }}"
+    groups: wheel
+    append: true
+
+- name: Create test directory
+  ansible.builtin.file:
+    path: "/home/{{ lab_user }}/test"
+    state: directory
+    owner: "{{ lab_user }}"
+    group: "{{ lab_user }}"
+    mode: "0755"
+
+- name: Create test inventory
+  ansible.builtin.copy:
+    dest: "/home/{{ lab_user }}/test/hosts"
+    content: |
+      [rhel]
+      node1 ansible_user={{ lab_user }} ansible_password={{ code_server_password }}
+    owner: "{{ lab_user }}"
+    group: "{{ lab_user }}"
+    mode: "0644"
+    backup: true
+
+- name: Create test playbook
+  ansible.builtin.copy:
+    dest: "/home/{{ lab_user }}/test/test.yml"
+    content: |
+      ---
+      - name: Test playbook
+        hosts: rhel
+    owner: "{{ lab_user }}"
+    group: "{{ lab_user }}"
+    mode: "0644"
+    backup: true
+
+- name: Enable SSHD password authentication
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    state: present
+    regexp: '^PasswordAuthentication'
+    line: PasswordAuthentication yes
+    backup: true
+
+- name: Restart SSHD
+  ansible.builtin.systemd:
+    name: sshd
+    state: restarted
+
+- name: Install and configure code-server
+  ansible.builtin.include_role:
+    name: code_server
+  vars:
+    code_server_username: "{{ lab_user }}"

@@ -118,10 +118,8 @@ locals {
     resolved_playbook   = local.playbooks[var.variant]
 
     extra_args = concat(
-        ["-e", "ansible_python_interpreter=/usr/bin/python3"],
-        var.ansible_vars_file != null
-            ? ["-e", var.ansible_vars_file]
-            : ["--scp-extra-args", "'-O'"]
+        ["-e", "ansible_python_interpreter=/usr/bin/python3", "--scp-extra-args", "'-O'"],
+        var.ansible_vars_file != null ? ["-e", "@${var.ansible_vars_file}"] : []
     )
 }
 ```
@@ -183,8 +181,11 @@ build {
 
     provisioner "ansible" {
         playbook_file   = "${path.root}/ansible/${local.resolved_playbook}"
-        user            = var.ssh_username
         extra_arguments = local.extra_args
+        # user is intentionally omitted — Packer's ansible provisioner inherits
+        # the SSH user from the communicator, which is set per source
+        # ("rhel" for GCP, "ec2-user" for AWS). This avoids hardcoding a single
+        # username that would be wrong for one of the two cloud targets.
     }
 }
 ```
@@ -226,39 +227,39 @@ Three thin playbooks that include shared tasks and add their variant-specific in
 
 #### `tasks/base_setup.yml`
 
-Common setup included by all three variants:
+Common setup included by all three variants. All references to the lab user use the `lab_user` variable (default `rhel`):
 
 1. Install `python3-pip` and `rsync` via `ansible.builtin.dnf`
 2. Install `passlib` via `ansible.builtin.pip`
-3. Configure `rhel` user (shell, password, wheel group)
-4. Create test directory `/home/rhel/test/` with sample inventory and playbook
+3. Configure `{{ lab_user }}` user (shell, password, wheel group)
+4. Create test directory `/home/{{ lab_user }}/test/` with sample inventory and playbook
 5. Enable SSHD password authentication and restart SSHD
-6. Install and configure code_server role
+6. Install and configure code_server role (passes `lab_user` as `code_server_username`)
 
-The `rhel` user password defaults to a variable `code_server_password` (default `ansible123!`). The test inventory credentials match.
+The user password defaults to the `code_server_password` variable (default `ansible123!`). The test inventory credentials match.
 
 #### `tasks/python_setup.yml`
 
 Python environment setup:
 
-1. Install `python3.11-pip` and `python3.12-pip` via `ansible.builtin.dnf`
+1. Install `python3.11`, `python3.11-pip`, `python3.12`, and `python3.12-pip` via `ansible.builtin.dnf`
 2. Verify Python version (with `changed_when: false`)
 
 No `alternatives` manipulation — pip variant playbooks use `pip3.11` explicitly; rpm variant gets Python from the AAP repo packages.
 
 #### `tasks/image_cleanup.yml`
 
-End-of-build image hygiene (adapted from upstream `10_image_cleanup.yml`):
+End-of-build image hygiene (adapted from upstream `10_image_cleanup.yml`). Upstream references to `student_username` and `ansible_user` are replaced with `lab_user`:
 
-1. Remove build-artifact users (keep only `rhel` and configurable list)
+1. Remove build-artifact users (keep only `{{ lab_user }}` and `awx`/`pulp`)
 2. Disable `dnf-automatic` timer
 3. Set `download_updates = no` and `apply_updates = no` in `/etc/dnf/automatic.conf`
-4. Apply GCP RHUI repo config from `rh-cloud.repo.j2` template
+4. Apply GCP RHUI repo config from `rh-cloud.repo.j2` template (guarded by `when: ansible_facts['system_vendor'] == 'Google'` — AWS AMIs ship their own RHUI config)
 5. Refresh dnf cache
 6. Remove AAP installer repo and directory (if present, guarded by `when`)
 7. Clean `/tmp/ansible*` directories
-8. Remove bash history
-9. Logout of container registries (for `rhel` user and `root`)
+8. Remove bash history for `{{ lab_user }}`
+9. Logout of container registries for `{{ lab_user }}` and `root`
 
 ### Variant Playbooks
 
@@ -271,6 +272,7 @@ All three follow the same structure. Each defines `ansible_dev_tools_version` wi
   gather_facts: true
   become: true
   vars:
+    lab_user: "rhel"
     code_server_password: 'ansible123!'
     ansible_dev_tools_version: "26.4.1"  # pip variants
     # ansible_dev_tools_version: "26.1.0"  # rpm variant
@@ -321,9 +323,9 @@ Variable `ansible_dev_tools_version` defaults to `26.4.1` (pip) or `26.1.0` (rpm
 Variant-specific block:
 
 ```yaml
-    - name: Copy AAP bundle
+    - name: Copy AAP bundle to target
       ansible.builtin.copy:
-        src: /tmp/aap.tar.gz
+        src: "{{ playbook_dir }}/aap.tar.gz"
         dest: /tmp/aap.tar.gz
 
     - name: Create AAP install directory
@@ -354,7 +356,7 @@ Variant-specific block:
         state: present
 ```
 
-The RPM variant requires `aap.tar.gz` to be available at `/tmp/aap.tar.gz` on the build host. A preliminary localhost play copies it from the playbook directory. The cleanup tasks will remove the AAP repo and install directory from the final image.
+The RPM variant requires the user to place `aap.tar.gz` in the `ansible/` directory before building. The `copy` task pushes it from `{{ playbook_dir }}/aap.tar.gz` to the target at `/tmp/aap.tar.gz`. No localhost play or `aap_download` role is needed — the upstream workshop dependency is removed. The cleanup tasks will remove the AAP repo and install directory from the final image.
 
 ---
 
@@ -507,6 +509,6 @@ Final artifact for RHDP: `s3://$S3_BUCKET/ansible-dev-tools/$VARIANT/ansible-dev
 ## Open Considerations
 
 1. **EE pulling**: Not included in the image build. Can be added as a separate playbook later if registry credentials are available.
-2. **RHUI template**: `rh-cloud.repo.j2` is GCP-specific (uses `rhui.googlecloud.com`). AWS RHEL AMIs come with their own RHUI config, so the cleanup task should only apply this template on GCP builds. This can be guarded by a variable or by detecting the cloud provider via `ansible_facts`.
+2. **RHUI template**: Resolved — the cleanup task guards `rh-cloud.repo.j2` deployment with `when: ansible_facts['system_vendor'] == 'Google'`. AWS AMIs keep their own RHUI config untouched.
 3. **`aap.tar.gz` for RPM variant**: The RPM variant requires this file to exist. The playbook expects it at `{{ playbook_dir }}/aap.tar.gz`. This is a prerequisite the user must provide.
-4. **AWS SSH user**: AWS RHEL AMIs use `ec2-user`, not `rhel`. The packer `amazon-ebs` source handles this via its own `ssh_username`, but the Ansible playbook needs to account for the different username when configuring the lab user.
+4. **AWS SSH user**: Resolved — the ansible provisioner's `user` field is omitted so it inherits from the communicator per source (`rhel` for GCP, `ec2-user` for AWS). The Ansible playbook still hardcodes user `rhel` for lab user configuration since that's the lab user regardless of which SSH user Packer connects as.
