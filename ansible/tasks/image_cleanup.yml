@@ -79,6 +79,7 @@
     state: absent
 
 - name: Logout of container registries
+  become: true
   become_user: "{{ item }}"
   ansible.builtin.command: podman logout --all
   loop:

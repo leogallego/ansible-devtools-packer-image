@@ -56,40 +56,29 @@ jobs:
           -force
           .
 
-      - name: Rename AMI with version
+      - name: Look up built AMI
         id: get-ami
         run: |
           VARIANT="${{ github.event.inputs.variant }}"
           REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
-          FINAL_NAME="ansible-dev-tools-${VARIANT}-$(date +%Y%m%d)"
 
           # Find the AMI built by Packer (most recent with matching prefix)
-          TEMP_AMI_ID=$(aws ec2 describe-images \
+          AMI_ID=$(aws ec2 describe-images \
             --owners self \
             --filters "Name=name,Values=ansible-dev-tools-${VARIANT}-*" \
             --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
             --output text \
             --region "$REGION")
 
-          echo "Found AMI: $TEMP_AMI_ID"
+          FINAL_NAME=$(aws ec2 describe-images \
+            --image-ids "$AMI_ID" \
+            --query 'Images[0].Name' \
+            --output text \
+            --region "$REGION")
 
-          # Copy AMI with versioned name
-          NEW_AMI_ID=$(aws ec2 copy-image \
-            --source-image-id "$TEMP_AMI_ID" \
-            --source-region "$REGION" \
-            --name "$FINAL_NAME" \
-            --description "ansible-dev-tools ${VARIANT} built on $(date +%Y-%m-%d)" \
-            --region "$REGION" \
-            --query 'ImageId' \
-            --output text)
+          echo "Found AMI: $AMI_ID ($FINAL_NAME)"
 
-          echo "New AMI ID: $NEW_AMI_ID"
-          aws ec2 wait image-available --image-ids "$NEW_AMI_ID" --region "$REGION"
-
-          # Delete the temporary AMI
-          aws ec2 deregister-image --image-id "$TEMP_AMI_ID" --region "$REGION"
-
-          echo "ami_id=$NEW_AMI_ID" >> $GITHUB_OUTPUT
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
           echo "final_name=$FINAL_NAME" >> $GITHUB_OUTPUT
 
       - name: Export AMI to S3 as raw
@@ -184,14 +173,27 @@ jobs:
                 --output text)
 
               # User-data to install tools
-              printf '%s\n' '#!/bin/bash' 'set -x' 'exec > /var/log/user-data.log 2>&1' 'yum install -y qemu-img awscli' > /tmp/user-data.sh
+              cat > /tmp/user-data.sh << 'USERDATA'
+          #!/bin/bash
+          set -x
+          exec > /var/log/user-data.log 2>&1
+          yum install -y qemu-img unzip
+          curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          /tmp/aws/install
+          rm -rf /tmp/awscliv2.zip /tmp/aws
+          USERDATA
 
               # Launch converter instance
+              CONVERTER_PROFILE="${{ vars.CONVERTER_INSTANCE_PROFILE || 'qcow2-converter' }}"
+
               CONVERTER_INSTANCE=$(aws ec2 run-instances \
                 --image-id "$CONVERTER_AMI" \
                 --instance-type t3.medium \
                 --key-name "$KEY_NAME" \
                 --security-group-ids "$TEMP_SG_ID" \
+                --associate-public-ip-address \
+                --iam-instance-profile "Name=$CONVERTER_PROFILE" \
                 --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":100,"VolumeType":"gp3","DeleteOnTermination":true}}]' \
                 --user-data file:///tmp/user-data.sh \
                 --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=qcow2-converter},{Key=Purpose,Value=temporary}]" \
@@ -205,6 +207,15 @@ jobs:
                 --instance-ids "$CONVERTER_INSTANCE" \
                 --query 'Reservations[0].Instances[0].PublicIpAddress' \
                 --output text)
+
+              if [ -z "$PUBLIC_IP" ] || [ "$PUBLIC_IP" = "None" ]; then
+                echo "ERROR: Converter instance did not receive a public IP"
+                aws ec2 terminate-instances --instance-ids "$CONVERTER_INSTANCE"
+                aws ec2 delete-key-pair --key-name "$KEY_NAME"
+                sleep 30
+                aws ec2 delete-security-group --group-id "$TEMP_SG_ID" || true
+                exit 1
+              fi
 
               # Wait for SSH
               for i in $(seq 1 30); do
@@ -245,16 +256,13 @@ jobs:
                   -o ServerAliveCountMax=240 \
                   -o TCPKeepAlive=yes \
                   -i /tmp/converter-key ec2-user@"$PUBLIC_IP" \
-                  "export AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' && \
-                   export AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' && \
-                   export AWS_DEFAULT_REGION='$AWS_DEFAULT_REGION' && \
-                   echo 'Downloading raw image...' && \
-                   aws s3 cp s3://$S3_BUCKET/$S3_KEY /tmp/$RAW_FILE --no-progress && \
+                  "echo 'Downloading raw image...' && \
+                   aws s3 cp s3://$S3_BUCKET/$S3_KEY /tmp/$RAW_FILE --no-progress --region $REGION && \
                    echo 'Converting to qcow2...' && \
                    qemu-img convert -f raw -O qcow2 -c /tmp/$RAW_FILE /tmp/$QCOW2_FILE && \
                    rm -f /tmp/$RAW_FILE && \
                    echo 'Uploading qcow2...' && \
-                   aws s3 cp /tmp/$QCOW2_FILE s3://$S3_BUCKET/$QCOW2_S3_KEY --no-progress && \
+                   aws s3 cp /tmp/$QCOW2_FILE s3://$S3_BUCKET/$QCOW2_S3_KEY --no-progress --region $REGION && \
                    rm -f /tmp/$QCOW2_FILE"
 
               # Cleanup converter

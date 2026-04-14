@@ -33,8 +33,8 @@
     mode: "0755"
 
 - name: Apply code-server settings
-  ansible.builtin.template:
-    src: settings.json
+  ansible.builtin.copy:
+    src: "{{ role_path }}/templates/settings.json"
     dest: "/home/{{ code_server_username }}/.local/share/code-server/User/settings.json"
     owner: "{{ code_server_username }}"
     group: "{{ code_server_username }}"
@@ -63,6 +63,7 @@
   retries: 5
 
 - name: Install custom extensions from local file
+  become: true
   become_user: "{{ code_server_username }}"
   ansible.builtin.command: >-
     /bin/code-server --install-extension
@@ -75,6 +76,7 @@
   changed_when: "'was successfully installed' in __code_server_install_local_ext.stdout | default('')"
 
 - name: Install VS Code Marketplace extensions
+  become: true
   become_user: "{{ code_server_username }}"
   ansible.builtin.command: "/bin/code-server --install-extension {{ item.name }}"
   loop: "{{ code_server_extensions }}"
