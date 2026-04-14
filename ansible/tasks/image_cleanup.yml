@@ -1,0 +1,90 @@
+---
+- name: Gather current standard users
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    cut -d: -f1,3 /etc/passwd | grep -E ':[0-9]{4}$' | cut -d: -f1
+  changed_when: false
+  register: __image_cleanup_standard_users
+
+- name: Remove build-artifact users (keep lab_user, awx, pulp)
+  ansible.builtin.user:
+    name: "{{ item }}"
+    state: absent
+    remove: true
+  loop: "{{ __image_cleanup_standard_users.stdout_lines }}"
+  when:
+    - item != lab_user
+    - item != "awx"
+    - item != "pulp"
+
+- name: Disable dnf-automatic timer
+  ansible.builtin.service:
+    name: dnf-automatic.timer
+    state: stopped
+
+- name: Set download_updates = no in automatic.conf
+  ansible.builtin.lineinfile:
+    path: /etc/dnf/automatic.conf
+    regexp: '^download_updates'
+    line: download_updates = no
+
+- name: Set apply_updates = no in automatic.conf
+  ansible.builtin.lineinfile:
+    path: /etc/dnf/automatic.conf
+    regexp: '^apply_updates'
+    line: apply_updates = no
+
+- name: Apply GCP RHUI repo configuration
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/rh-cloud.repo.j2"
+    dest: /etc/yum.repos.d/rh-cloud.repo
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  when: ansible_facts['system_vendor'] == 'Google'
+
+- name: Refresh dnf cache
+  ansible.builtin.command: dnf -y makecache
+  register: __image_cleanup_makecache
+  changed_when: "'Metadata cache created' in __image_cleanup_makecache.stdout"
+
+- name: Remove AAP installer repo
+  ansible.builtin.yum_repository:
+    name: aap_installer
+    state: absent
+
+- name: Remove AAP install directory
+  ansible.builtin.file:
+    path: /tmp/aap_install
+    state: absent
+
+- name: Find Ansible tmp directories
+  ansible.builtin.find:
+    paths: /tmp/
+    file_type: directory
+    patterns: 'ansible*'
+  register: __image_cleanup_ansible_temp_dirs
+
+- name: Remove Ansible tmp directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ __image_cleanup_ansible_temp_dirs.files }}"
+  when: __image_cleanup_ansible_temp_dirs.files is defined
+
+- name: Remove bash history for lab user
+  ansible.builtin.file:
+    path: "/home/{{ lab_user }}/.bash_history"
+    state: absent
+
+- name: Logout of container registries
+  become_user: "{{ item }}"
+  ansible.builtin.command: podman logout --all
+  loop:
+    - "{{ lab_user }}"
+    - root
+  register: __image_cleanup_podman_logout
+  changed_when: __image_cleanup_podman_logout.rc == 0
+  failed_when: false
+  # Guard: only relevant when EE pulling is added (see GitHub issue #2)
