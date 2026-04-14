@@ -1,0 +1,60 @@
+---
+name: Build Image (GCP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Build variant'
+        required: true
+        type: choice
+        options:
+          - pip
+          - pip-pinned
+          - rpm
+        default: 'pip'
+
+env:
+  PACKER_VERSION: "latest"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCLOUD_SA_KEY }}'
+
+      - name: Set up Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: ${{ env.PACKER_VERSION }}
+
+      - name: Run packer init
+        run: packer init .
+
+      - name: Run packer validate
+        run: >-
+          packer validate
+          -var="variant=${{ github.event.inputs.variant }}"
+          .
+
+      - name: Build image
+        run: >-
+          packer build
+          -only='googlecompute.*'
+          -var="variant=${{ github.event.inputs.variant }}"
+          -force
+          .
+
+      - name: Generate build summary
+        if: success()
+        run: |
+          echo "## GCP Image Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "**Variant:** ${{ github.event.inputs.variant }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Date:** $(date)" >> $GITHUB_STEP_SUMMARY
