@@ -1,0 +1,113 @@
+---
+- name: Install code-server
+  ansible.builtin.dnf:
+    name:
+      - "{{ code_server_rpm_url }}"
+    state: present
+    disable_gpg_check: true
+  register: __code_server_dnf_result
+  until: __code_server_dnf_result is not failed
+  retries: 30
+  delay: 1
+
+- name: Install requests Python package
+  ansible.builtin.pip:
+    name: requests>=2.14.2
+
+- name: Apply code-server systemd service file
+  ansible.builtin.template:
+    src: code-server.service.j2
+    dest: /etc/systemd/system/code-server.service
+    owner: "{{ code_server_username }}"
+    group: wheel
+    mode: "0744"
+    backup: true
+
+- name: Ensure code-server User settings directory exists
+  ansible.builtin.file:
+    path: "/home/{{ code_server_username }}/.local/share/code-server/User/"
+    recurse: true
+    state: directory
+    owner: "{{ code_server_username }}"
+    group: "{{ code_server_username }}"
+    mode: "0755"
+
+- name: Apply code-server settings
+  ansible.builtin.template:
+    src: settings.json
+    dest: "/home/{{ code_server_username }}/.local/share/code-server/User/settings.json"
+    owner: "{{ code_server_username }}"
+    group: "{{ code_server_username }}"
+    mode: "0644"
+    backup: true
+
+- name: Ensure code-server extensions directory exists
+  ansible.builtin.file:
+    path: "/home/{{ code_server_username }}/.local/share/code-server/extensions/"
+    state: directory
+    mode: "0755"
+    owner: "{{ code_server_username }}"
+    group: "{{ code_server_username }}"
+
+- name: Download custom VS Code extension files
+  ansible.builtin.get_url:
+    url: "{{ item.download_url }}"
+    dest: "/home/{{ code_server_username }}/.local/share/code-server/extensions/"
+    owner: "{{ code_server_username }}"
+    group: "{{ code_server_username }}"
+    mode: "0644"
+  loop: "{{ code_server_extensions }}"
+  when: item.download_url is defined
+  register: __code_server_download_extension
+  until: __code_server_download_extension is not failed
+  retries: 5
+
+- name: Install custom extensions from local file
+  become_user: "{{ code_server_username }}"
+  ansible.builtin.command: >-
+    /bin/code-server --install-extension
+    /home/{{ code_server_username }}/.local/share/code-server/extensions/{{ item.filename }}
+  loop: "{{ code_server_extensions }}"
+  when: item.filename is defined
+  register: __code_server_install_local_ext
+  until: __code_server_install_local_ext is not failed
+  retries: 5
+  changed_when: "'was successfully installed' in __code_server_install_local_ext.stdout | default('')"
+
+- name: Install VS Code Marketplace extensions
+  become_user: "{{ code_server_username }}"
+  ansible.builtin.command: "/bin/code-server --install-extension {{ item.name }}"
+  loop: "{{ code_server_extensions }}"
+  when: (item.filename is undefined) or (item.download_url is undefined)
+  register: __code_server_install_marketplace_ext
+  until: __code_server_install_marketplace_ext is not failed
+  retries: 5
+  changed_when: "'was successfully installed' in __code_server_install_marketplace_ext.stdout | default('')"
+
+- name: Install nginx server
+  ansible.builtin.dnf:
+    name: nginx
+    state: present
+
+- name: Copy nginx configuration for code-server
+  ansible.builtin.template:
+    src: code-server-nginx.conf.j2
+    dest: /etc/nginx/default.d/vscode.conf
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+
+- name: Enable and start code-server
+  ansible.builtin.systemd:
+    name: code-server
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Enable and start nginx
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: true
+    state: restarted
+    daemon_reload: true
