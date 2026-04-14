@@ -1,0 +1,19 @@
+---
+- name: Install Python 3.11 and 3.12 with pip
+  ansible.builtin.dnf:
+    name:
+      - python3.11
+      - python3.11-pip
+      - python3.12
+      - python3.12-pip
+    state: present
+
+- name: Verify Python version
+  ansible.builtin.command: python3 --version
+  changed_when: false
+  register: __python_setup_version
+
+- name: Display Python version
+  ansible.builtin.debug:
+    msg: "Default Python version: {{ __python_setup_version.stdout }}"
+    verbosity: 1
