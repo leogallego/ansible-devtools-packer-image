@@ -1,3 +1,5 @@
 # Reference files copied from upstream repos (not part of this project)
 tmp/
 qemu/rh-creds.yml
+qemu/ocp-env.sh
+output/
