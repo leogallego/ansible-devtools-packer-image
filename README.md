@@ -1,27 +1,29 @@
 # ansible-devtools-image
 
-Parameterized Packer + Ansible image builder for ansible-dev-tools lab environments. Produces a RHEL 9 image with [code-server](https://github.com/coder/code-server) (VS Code in browser) and [ansible-dev-tools](https://github.com/ansible/ansible-dev-tools) pre-installed. Targets GCP and AWS, with qcow2 export for RHDP.
+Parameterized Packer + Ansible image builder for ansible-dev-tools lab environments. Produces a RHEL 9 image with [code-server](https://github.com/coder/code-server) (VS Code in browser) and [ansible-dev-tools](https://github.com/ansible/ansible-dev-tools) pre-installed. Targets GCP, AWS (with qcow2 export for RHDP), and local QEMU/KVM.
 
 ## Image variants
 
 | Variant | Description | ansible-dev-tools version |
 |---------|-------------|--------------------------|
 | `pip` | Installed via pip, unpinned (latest) | latest |
-| `pip-pinned` | Installed via pip, pinned version | 26.4.1 |
+| `pip-pinned` | Installed via pip with locked dependencies | 26.4.6 |
 | `rpm` | Installed via RPM from offline AAP bundle | 26.1.0 |
 
 All variants include:
 - RHEL 9 base
 - Python 3.11 and 3.12 with pip
-- code-server 4.115.0 with nginx reverse proxy (accessible at `/editor/`)
+- code-server 4.122.0 (direct bind on port 8080, optional nginx proxy)
 - Ansible and Markdown VS Code extensions
-- Lab user (`rhel`) with sudo access and test playbook scaffold
+- Lab user (`rhel`) with passwordless sudo and test playbook scaffold
+- Common dev packages: git, podman, jq, unzip, crun, nano, xfsdump, tree, pinentry-curses
 
 ## Prerequisites
 
 - [Packer](https://www.packer.io/downloads) (>= 1.9)
 - [Ansible](https://docs.ansible.com/ansible/latest/installation_guide/) (on the machine running Packer)
-- GCP or AWS credentials (see [CI/CD Setup](#cicd-setup) for GitHub Actions)
+- `passlib` Python package (on the Ansible controller: `pip install passlib`)
+- GCP, AWS, or QEMU/KVM credentials (see below)
 
 For the `rpm` variant, you must place an AAP bundle tarball at `ansible/aap.tar.gz` before building.
 
@@ -52,6 +54,28 @@ packer build -only='googlecompute.*' -var="variant=rpm" .
 packer build -only='amazon-ebs.*' -var="variant=pip" .
 ```
 
+### Build locally with QEMU/KVM
+
+Requires `virt-customize`, QEMU/KVM with `/dev/kvm`, and a RHEL 9 KVM guest qcow2 image.
+
+```bash
+# 1. Prepare the base image (creates user, enables SSH, removes cloud-init)
+./qemu/prepare-image.sh /path/to/rhel-9.x-x86_64-kvm.qcow2
+
+# 2. Create a credentials file for subscription-manager (gitignored)
+cat > qemu/rh-creds.yml << EOF
+rh_org: "YOUR_ORG_ID"
+rh_activation_key: "YOUR_ACTIVATION_KEY"
+EOF
+
+# 3. Build
+packer build -only='qemu.*' \
+  -var="qemu_iso_url=tmp/prepared/rhel-9.x-x86_64-kvm.qcow2" \
+  -var="ansible_vars_file=qemu/rh-creds.yml" .
+```
+
+The output qcow2 will be in `output/`.
+
 ### Custom image name
 
 ```bash
@@ -77,25 +101,43 @@ packer build -only='googlecompute.*' -var="ansible_vars_file=my-vars.yml" .
 | `gcp_machine_type` | `n1-standard-2` | GCP machine type for the build instance |
 | `aws_region` | `us-east-1` | AWS region |
 | `aws_instance_type` | `t3.medium` | AWS instance type for the build instance |
+| `qemu_iso_url` | `rhel-9-x86_64-kvm.qcow2` | Path to RHEL 9 KVM guest image (prepared with `qemu/prepare-image.sh`) |
+| `qemu_iso_checksum` | `none` | Checksum of the QEMU source image |
+| `qemu_output_directory` | `output` | Output directory for the QEMU build |
+
+## code-server configuration
+
+code-server defaults to binding directly on `0.0.0.0:8080` with no authentication and no nginx proxy. This is the recommended configuration for CNV/OpenShift deployments where TLS is handled by the OCP route.
+
+For standalone deployments that need nginx as a reverse proxy, set `code_server_nginx: true` in the playbook vars. When enabled, nginx listens on the configured port and proxies to code-server on `localhost:8081`.
+
+Extension webviews (Details, Features, Changelog tabs) require HTTPS/secure context to render. On CNV, the OCP route provides TLS. On standalone GCP/AWS, use `code-server --cert` or a reverse proxy with TLS (e.g., Caddy).
 
 ## Repository structure
 
 ```
 packer-ansible-devtools-image/
-  ansible-dev-tools.pkr.hcl              # parameterized Packer file (GCP + AWS)
+  ansible-dev-tools.pkr.hcl              # parameterized Packer file (GCP + AWS + QEMU)
 
   ansible/
     dev-tools-pip.yml                     # playbook: pip unpinned variant
-    dev-tools-pip-pinned.yml              # playbook: pip pinned variant
+    dev-tools-pip-pinned.yml              # playbook: pip pinned variant (locked deps)
     dev-tools-rpm.yml                     # playbook: rpm variant (requires aap.tar.gz)
+    qemu-prepare.yml                      # playbook: QEMU-only subscription-manager registration
     tasks/
-      base_setup.yml                      # shared: user, sshd, test environment, code-server
+      base_setup.yml                      # shared: packages, user, sudoers, sshd, code-server
       python_setup.yml                    # shared: Python 3.11/3.12 install
       image_cleanup.yml                   # shared: end-of-build image hygiene
+      qemu_prepare.yml                    # QEMU: subscription-manager registration task
     roles/
-      code_server/                        # browser-based VS Code (code-server + nginx)
+      code_server/                        # browser-based VS Code (code-server, optional nginx)
     templates/
       rh-cloud.repo.j2                   # GCP RHUI repo configuration
+
+  qemu/
+    prepare-image.sh                      # virt-customize script for QEMU base image
+    meta-data                             # cloud-init metadata (unused with virt-customize flow)
+    user-data                             # cloud-init user-data (unused with virt-customize flow)
 
   .github/
     workflows/
@@ -204,6 +246,13 @@ The GCP service account whose key is stored in `GCLOUD_SA_KEY` needs the followi
 - `roles/compute.imageUser` — use source images
 - `roles/compute.storageAdmin` — create output images
 - `roles/iam.serviceAccountUser` — use the service account on instances
+
+### QEMU/KVM prerequisites
+
+- QEMU/KVM installed with `/dev/kvm` available
+- `virt-customize` (from `guestfs-tools` or `libguestfs-tools`)
+- RHEL 9 KVM guest qcow2 image from [Red Hat Customer Portal](https://access.redhat.com/downloads/content/rhel)
+- Red Hat subscription (org ID + activation key) for package installation during build
 
 ## License
 
