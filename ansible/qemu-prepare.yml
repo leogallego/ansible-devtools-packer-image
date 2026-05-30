@@ -1,0 +1,9 @@
+---
+- name: Prepare QEMU image (register with Red Hat)
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Include QEMU preparation tasks
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/tasks/qemu_prepare.yml"

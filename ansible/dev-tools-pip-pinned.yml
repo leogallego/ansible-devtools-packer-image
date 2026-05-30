@@ -6,7 +6,7 @@
   vars:
     lab_user: "rhel"
     code_server_password: 'ansible123!'
-    ansible_dev_tools_version: "26.4.1"
+    ansible_dev_tools_version: "26.4.6"
   tasks:
     - name: Include base setup
       ansible.builtin.include_tasks:
@@ -16,9 +16,9 @@
       ansible.builtin.include_tasks:
         file: "{{ playbook_dir }}/tasks/python_setup.yml"
 
-    - name: Install ansible-dev-tools via pip (pinned)
+    - name: Install ansible-dev-tools via pip (locked)
       ansible.builtin.pip:
-        name: "ansible-dev-tools=={{ ansible_dev_tools_version }}"
+        name: "ansible-dev-tools[lock]=={{ ansible_dev_tools_version }}"
         state: present
         executable: pip3.11
 

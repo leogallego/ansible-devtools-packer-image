@@ -1,0 +1,28 @@
+#cloud-config
+users:
+  - name: rhel
+    plain_text_passwd: ansible123!
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    groups: wheel
+
+ssh_pwauth: true
+
+chpasswd:
+  expire: false
+  users:
+    - name: rhel
+      password: ansible123!
+      type: text
+
+runcmd:
+  - sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - grep -q '^PasswordAuthentication' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+  - systemctl restart sshd
+
+growpart:
+  mode: auto
+  devices: ["/"]
+  ignore_growroot_disabled: false

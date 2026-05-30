@@ -11,14 +11,15 @@ Restart=on-failure
 RestartSec=10
 {% if code_server_authentication | bool %}
 Environment="PASSWORD={{ code_server_password }}"
-
-ExecStart=/bin/code-server
-{% else %}
-ExecStart=/bin/code-server --auth none
 {% endif %}
-
+{% if code_server_nginx | bool %}
+ExecStart=/bin/code-server --auth none --bind-addr 127.0.0.1:8081
+{% elif code_server_authentication | bool %}
+ExecStart=/bin/code-server --bind-addr 0.0.0.0:{{ code_server_port }}
+{% else %}
+ExecStart=/bin/code-server --auth none --bind-addr 0.0.0.0:{{ code_server_port }}
+{% endif %}
 ExecStop=/bin/kill -s QUIT $MAINPID
-
 
 [Install]
 WantedBy=multi-user.target

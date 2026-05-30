@@ -1,0 +1,8 @@
+---
+- name: Register with subscription-manager
+  ansible.builtin.command: >-
+    subscription-manager register
+    --org={{ rh_org }}
+    --activationkey={{ rh_activation_key }}
+  register: __qemu_prepare_sm_register
+  changed_when: "'The system has been registered' in __qemu_prepare_sm_register.stdout | default('')"

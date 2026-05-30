@@ -6,7 +6,7 @@
   vars:
     lab_user: "rhel"
     code_server_password: 'ansible123!'
-    ansible_dev_tools_version: "26.4.1"
+    ansible_dev_tools_version: "26.4.6"
   tasks:
     - name: Include base setup
       ansible.builtin.include_tasks:

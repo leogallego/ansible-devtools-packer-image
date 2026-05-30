@@ -12,6 +12,10 @@ packer {
       version = ">= v1.8.0"
       source  = "github.com/hashicorp/amazon"
     }
+    qemu = {
+      version = ">= v1.1.1"
+      source  = "github.com/hashicorp/qemu"
+    }
   }
 }
 
@@ -21,7 +25,7 @@ variable "variant" {
 
   validation {
     condition     = contains(["pip", "pip-pinned", "rpm"], var.variant)
-    error_message = "variant must be one of: pip, pip-pinned, rpm"
+    error_message = "Variant must be one of: pip, pip-pinned, rpm."
   }
 }
 
@@ -69,6 +73,24 @@ variable "aws_instance_type" {
   default = "t3.medium"
 }
 
+# --- QEMU variables ---
+
+variable "qemu_iso_url" {
+  type        = string
+  default     = "rhel-9-x86_64-kvm.qcow2"
+  description = "Path to RHEL 9 KVM guest image (qcow2)."
+}
+
+variable "qemu_iso_checksum" {
+  type    = string
+  default = "none"
+}
+
+variable "qemu_output_directory" {
+  type    = string
+  default = "output"
+}
+
 # --- Locals ---
 
 locals {
@@ -103,6 +125,29 @@ source "googlecompute" "ansible-dev-tools" {
   image_name          = local.resolved_image_name
 }
 
+source "qemu" "ansible-dev-tools" {
+  iso_url                = var.qemu_iso_url
+  iso_checksum           = var.qemu_iso_checksum
+  disk_image             = true
+  output_directory       = var.qemu_output_directory
+  vm_name                = "${local.resolved_image_name}.qcow2"
+  format                 = "qcow2"
+  accelerator            = "kvm"
+  cpus                   = 2
+  memory                 = 4096
+  skip_resize_disk       = true
+  ssh_username           = var.ssh_username
+  ssh_password           = "ansible123!"
+  ssh_timeout            = "5m"
+  ssh_handshake_attempts = 50
+  boot_wait              = "15s"
+  shutdown_command       = "sudo shutdown -P now"
+  headless               = true
+  qemuargs = [
+    ["-cpu", "host"]
+  ]
+}
+
 source "amazon-ebs" "ansible-dev-tools" {
   region = var.aws_region
   source_ami_filter {
@@ -124,7 +169,8 @@ source "amazon-ebs" "ansible-dev-tools" {
 build {
   sources = [
     "sources.googlecompute.ansible-dev-tools",
-    "sources.amazon-ebs.ansible-dev-tools"
+    "sources.amazon-ebs.ansible-dev-tools",
+    "sources.qemu.ansible-dev-tools"
   ]
 
   provisioner "shell" {
@@ -132,6 +178,13 @@ build {
       "sudo dnf install -y openssh-server",
       "sudo systemctl restart sshd"
     ]
+    only = ["googlecompute.ansible-dev-tools", "amazon-ebs.ansible-dev-tools"]
+  }
+
+  provisioner "ansible" {
+    playbook_file   = "${path.root}/ansible/qemu-prepare.yml"
+    extra_arguments = local.extra_args
+    only            = ["qemu.ansible-dev-tools"]
   }
 
   provisioner "ansible" {

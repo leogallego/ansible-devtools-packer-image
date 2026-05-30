@@ -21,6 +21,12 @@
   ansible.builtin.service:
     name: dnf-automatic.timer
     state: stopped
+  failed_when: false
+
+- name: Check if automatic.conf exists
+  ansible.builtin.stat:
+    path: /etc/dnf/automatic.conf
+  register: __image_cleanup_automatic_conf
 
 - name: Set download_updates = no in automatic.conf
   ansible.builtin.lineinfile:
@@ -28,6 +34,7 @@
     regexp: '^download_updates'
     line: download_updates = no
     backup: true
+  when: __image_cleanup_automatic_conf.stat.exists
 
 - name: Set apply_updates = no in automatic.conf
   ansible.builtin.lineinfile:
@@ -35,6 +42,7 @@
     regexp: '^apply_updates'
     line: apply_updates = no
     backup: true
+  when: __image_cleanup_automatic_conf.stat.exists
 
 - name: Apply GCP RHUI repo configuration
   ansible.builtin.template:
@@ -74,6 +82,17 @@
     state: absent
   loop: "{{ __image_cleanup_ansible_temp_dirs.files }}"
   when: __image_cleanup_ansible_temp_dirs.files is defined
+
+- name: Unregister from subscription-manager
+  ansible.builtin.command: subscription-manager unregister
+  register: __image_cleanup_sm_unregister
+  changed_when: "'System has been unregistered' in __image_cleanup_sm_unregister.stdout | default('')"
+  failed_when: false
+
+- name: Clean subscription-manager data
+  ansible.builtin.command: subscription-manager clean
+  changed_when: false
+  failed_when: false
 
 - name: Remove bash history for lab user
   ansible.builtin.file:

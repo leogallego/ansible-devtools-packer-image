@@ -86,20 +86,6 @@
   retries: 5
   changed_when: "'was successfully installed' in __code_server_install_marketplace_ext.stdout | default('')"
 
-- name: Install nginx server
-  ansible.builtin.dnf:
-    name: nginx
-    state: present
-
-- name: Copy nginx configuration for code-server
-  ansible.builtin.template:
-    src: code-server-nginx.conf.j2
-    dest: /etc/nginx/default.d/vscode.conf
-    owner: root
-    group: root
-    mode: "0644"
-    backup: true
-
 - name: Enable and start code-server
   ansible.builtin.systemd:
     name: code-server
@@ -107,9 +93,33 @@
     state: started
     daemon_reload: true
 
+- name: Install nginx server
+  ansible.builtin.dnf:
+    name: nginx
+    state: present
+  when: code_server_nginx | bool
+
+- name: Allow nginx to connect to upstream services
+  ansible.posix.seboolean:
+    name: httpd_can_network_connect
+    state: true
+    persistent: true
+  when: code_server_nginx | bool
+
+- name: Copy nginx configuration for code-server
+  ansible.builtin.template:
+    src: code-server-nginx.conf.j2
+    dest: /etc/nginx/conf.d/code-server.conf
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  when: code_server_nginx | bool
+
 - name: Enable and start nginx
   ansible.builtin.systemd:
     name: nginx
     enabled: true
     state: restarted
     daemon_reload: true
+  when: code_server_nginx | bool

@@ -4,6 +4,15 @@
     name:
       - python3-pip
       - rsync
+      - nano
+      - xfsdump
+      - unzip
+      - git
+      - podman
+      - jq
+      - crun
+      - tree
+      - pinentry-curses
     state: present
 
 - name: Install passlib Python package
@@ -48,6 +57,14 @@
     group: "{{ lab_user }}"
     mode: "0644"
     backup: true
+
+- name: Configure passwordless sudo for lab user
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ lab_user }}_sudoers"
+    content: "%{{ lab_user }} ALL=(ALL:ALL) NOPASSWD:ALL"
+    owner: root
+    group: root
+    mode: "0440"
 
 - name: Enable SSHD password authentication
   ansible.builtin.lineinfile:
