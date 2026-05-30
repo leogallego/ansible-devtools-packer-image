@@ -45,16 +45,40 @@ jobs:
           .
 
       - name: Build image
-        run: >-
-          packer build
-          -only='googlecompute.*'
-          -var="variant=${{ github.event.inputs.variant }}"
-          -force
-          .
+        id: build
+        run: |
+          packer build \
+            -only='googlecompute.*' \
+            -var="variant=${{ github.event.inputs.variant }}" \
+            -force \
+            . 2>&1 | tee /tmp/packer-build.log
+
+          BUILD_NAME=$(grep -oP "A disk image was created.*: \K.*" /tmp/packer-build.log)
+          ADT_VERSION=$(grep -oP 'content: \K[0-9]+\.[0-9]+\.[0-9]+' /tmp/packer-build.log | tail -1)
+          FINAL_NAME="ansible-devtools-image-$(echo "$ADT_VERSION" | tr '.' '-')"
+
+          echo "build_name=$BUILD_NAME" >> "$GITHUB_OUTPUT"
+          echo "adt_version=$ADT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "final_name=$FINAL_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Rename image to versioned name
+        if: success()
+        run: |
+          BUILD_NAME="${{ steps.build.outputs.build_name }}"
+          FINAL_NAME="${{ steps.build.outputs.final_name }}"
+
+          if [ "$BUILD_NAME" != "$FINAL_NAME" ]; then
+            gcloud compute images create "$FINAL_NAME" \
+              --source-image="$BUILD_NAME" \
+              --project=red-hat-mbu
+            gcloud compute images delete "$BUILD_NAME" \
+              --project=red-hat-mbu --quiet
+          fi
 
       - name: Generate build summary
         if: success()
         run: |
           echo "## GCP Image Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "**Variant:** ${{ github.event.inputs.variant }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Build Date:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "**ansible-dev-tools:** ${{ steps.build.outputs.adt_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image name:** ${{ steps.build.outputs.final_name }}" >> $GITHUB_STEP_SUMMARY

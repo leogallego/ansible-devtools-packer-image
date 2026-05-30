@@ -34,6 +34,7 @@ variable "image_name" {
   default = null
 }
 
+
 variable "ssh_username" {
   type    = string
   default = "rhel"
@@ -94,18 +95,13 @@ variable "qemu_output_directory" {
 # --- Locals ---
 
 locals {
-  image_names = {
-    pip        = "ansible-dev-tools-pip"
-    pip-pinned = "ansible-dev-tools-pip-pinned"
-    rpm        = "ansible-dev-tools-rpm"
-  }
   playbooks = {
     pip        = "dev-tools-pip.yml"
     pip-pinned = "dev-tools-pip-pinned.yml"
     rpm        = "dev-tools-rpm.yml"
   }
-  timestamp           = formatdate("YYYYMMDD", timestamp())
-  resolved_image_name = coalesce(var.image_name, "${local.image_names[var.variant]}-${local.timestamp}")
+  timestamp           = formatdate("YYYYMMDD-hhmm", timestamp())
+  resolved_image_name = coalesce(var.image_name, "ansible-devtools-image-${var.variant}-${local.timestamp}")
   resolved_playbook   = local.playbooks[var.variant]
 
   extra_args = concat(

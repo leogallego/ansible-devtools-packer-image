@@ -22,6 +22,12 @@
         state: present
         executable: pip3.11
 
+    - name: Write version file
+      ansible.builtin.copy:
+        content: "{{ ansible_dev_tools_version }}"
+        dest: /etc/ansible-devtools-image-release
+        mode: "0644"
+
     - name: Include image cleanup
       ansible.builtin.include_tasks:
         file: "{{ playbook_dir }}/tasks/image_cleanup.yml"

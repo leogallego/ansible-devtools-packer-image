@@ -50,13 +50,20 @@ jobs:
           .
 
       - name: Build AMI
-        run: >-
-          packer build
-          -only='amazon-ebs.*'
-          -var="variant=${{ github.event.inputs.variant }}"
-          -var="aws_region=${{ env.AWS_REGION }}"
-          -force
-          .
+        id: build
+        run: |
+          packer build \
+            -only='amazon-ebs.*' \
+            -var="variant=${{ github.event.inputs.variant }}" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -force \
+            . 2>&1 | tee /tmp/packer-build.log
+
+          ADT_VERSION=$(grep -oP 'content: \K[0-9]+\.[0-9]+\.[0-9]+' /tmp/packer-build.log | tail -1)
+          FINAL_NAME="ansible-devtools-image-$(echo "$ADT_VERSION" | tr '.' '-')"
+
+          echo "adt_version=$ADT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "final_name=$FINAL_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Look up built AMI
         id: get-ami
@@ -64,24 +71,15 @@ jobs:
           VARIANT="${{ github.event.inputs.variant }}"
           REGION="${{ env.AWS_REGION }}"
 
-          # Find the AMI built by Packer (most recent with matching prefix)
           AMI_ID=$(aws ec2 describe-images \
             --owners self \
-            --filters "Name=name,Values=ansible-dev-tools-${VARIANT}-*" \
+            --filters "Name=name,Values=ansible-devtools-image-${VARIANT}-*" \
             --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
             --output text \
             --region "$REGION")
 
-          FINAL_NAME=$(aws ec2 describe-images \
-            --image-ids "$AMI_ID" \
-            --query 'Images[0].Name' \
-            --output text \
-            --region "$REGION")
-
-          echo "Found AMI: $AMI_ID ($FINAL_NAME)"
-
-          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
-          echo "final_name=$FINAL_NAME" >> $GITHUB_OUTPUT
+          echo "Found AMI: $AMI_ID"
+          echo "ami_id=$AMI_ID" >> "$GITHUB_OUTPUT"
 
       - name: Export AMI to S3 as raw
         id: export-ami
@@ -111,7 +109,7 @@ jobs:
           S3_BUCKET="${{ vars.S3_BUCKET_NAME || 'ansible-dev-tools-images' }}"
           VARIANT="${{ github.event.inputs.variant }}"
           REGION="${{ env.AWS_REGION }}"
-          FINAL_NAME="${{ steps.get-ami.outputs.final_name }}"
+          FINAL_NAME="${{ steps.build.outputs.final_name }}"
           QCOW2_FILE="${FINAL_NAME}.qcow2"
           QCOW2_S3_KEY="ansible-dev-tools/${VARIANT}/${QCOW2_FILE}"
 
@@ -333,8 +331,8 @@ jobs:
         run: |
           echo "## AWS Image Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "**Variant:** ${{ github.event.inputs.variant }}" >> $GITHUB_STEP_SUMMARY
-          echo "**AMI Name:** ${{ steps.get-ami.outputs.final_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**ansible-dev-tools:** ${{ steps.build.outputs.adt_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image name:** ${{ steps.build.outputs.final_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**qcow2 Location:** ${{ steps.convert-qcow2.outputs.s3_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Build Date:** $(date)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "AMI and snapshots have been automatically cleaned up." >> $GITHUB_STEP_SUMMARY
